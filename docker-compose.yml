@@ -51,7 +51,7 @@ services:
     networks:
       - skillpulse
     ports:
-      - "80:80"
+      - "80:8084"
     depends_on:
       backend:
         condition: service_healthy
