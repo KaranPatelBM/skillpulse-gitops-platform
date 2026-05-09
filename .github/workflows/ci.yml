@@ -181,6 +181,12 @@ jobs:
         - name: Load Backend Image
           run: docker load -i ${{ matrix.image }}.tar
 
+        - name: Retag Docker Image
+          run: |
+            docker tag \
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:latest \
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:${{ github.sha }}
+
         - name: Push Latest Tag
           run: docker push $DOCKERHUB_USERNAME/${{ matrix.image }}:latest
 
