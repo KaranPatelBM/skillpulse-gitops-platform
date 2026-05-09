@@ -128,10 +128,10 @@ jobs:
       - name: Create .env file
         run: |
           cat <<EOF > .env
-          MYSQL_ROOT_PASSWORD=rootpassword
+          MYSQL_ROOT_PASSWORD= ${{secrets.MYSQL_ROOT_PASSWORD}}
           DB_NAME=skillpulse
           DB_USER=skillpulse
-          DB_PASSWORD=skillpulse123
+          DB_PASSWORD= ${{secrets.DB_PASSWORD}}
           DOCKERHUB_USERNAME=$DOCKERHUB_USERNAME
           EOF
 
