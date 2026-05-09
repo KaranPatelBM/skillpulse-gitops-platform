@@ -1,5 +1,6 @@
 services:
   db:
+    container_name: skillpulse-db
     image: mysql:8.4
     restart: unless-stopped
     environment:
@@ -7,11 +8,9 @@ services:
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - skillpulse
     healthcheck:
@@ -22,8 +21,8 @@ services:
       start_period: 30s
     
   backend:
+    container_name: skillpulse-backend
     image: ${DOCKERHUB_USERNAME}/skillpulse-backend:latest
-    build: ./backend
     restart: unless-stopped
     networks:
       - skillpulse
@@ -38,17 +37,30 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   frontend:
+    container_name: skillpulse-frontend
     image: ${DOCKERHUB_USERNAME}/skillpulse-frontend:latest
-    build: ./frontend
     restart: unless-stopped
     networks:
       - skillpulse
     ports:
       - "80:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   mysql_data:
