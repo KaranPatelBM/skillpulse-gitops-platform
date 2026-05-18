@@ -4,10 +4,10 @@ services:
     image: mysql:8.4
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: skillpulse
+      MYSQL_USER: skillpulse
+      MYSQL_PASSWORD: skillpulse123
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -22,16 +22,16 @@ services:
     
   backend:
     container_name: skillpulse-backend
-    image: ${DOCKERHUB_USERNAME}/skillpulse-backend:latest
+    image: karanpatelbm2000/skillpulse-backend:${IMAGE_TAG}
     restart: unless-stopped
     networks:
       - skillpulse
     environment:
       DB_HOST: db
       DB_PORT: "3306"
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
+      DB_USER: skillpulse
+      DB_PASSWORD: skillpulse123
+      DB_NAME: skillpulse
       PORT: "8080"
   
     depends_on:
@@ -46,7 +46,7 @@ services:
 
   frontend:
     container_name: skillpulse-frontend
-    image: ${DOCKERHUB_USERNAME}/skillpulse-frontend:latest
+    image: karanpatelbm2000/skillpulse-frontend:${IMAGE_TAG}
     restart: unless-stopped
     networks:
       - skillpulse

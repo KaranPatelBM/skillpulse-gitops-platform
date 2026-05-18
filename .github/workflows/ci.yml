@@ -3,6 +3,8 @@ name: gitops-CI
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
 
 concurrency:
   group: gitops-ci
@@ -14,9 +16,30 @@ env:
 
 jobs:
 
+  setup:
+    name: Setup Variables
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+      is_release: ${{ steps.vars.outputs.is_release }}
+
+    steps:
+      - name: Set Variables
+        id: vars
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "image_tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "image_tag=main-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          fi  
+
   docker-build:
     name: Docker-build
     runs-on: ubuntu-latest
+    needs: setup
 
     strategy:
       matrix:
@@ -42,30 +65,23 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build Docker Image
-        run: |
-          docker build \
-            -t $DOCKERHUB_USERNAME/${{ matrix.image }}:latest \
-            -t $DOCKERHUB_USERNAME/${{ matrix.image }}:${{ github.sha }} \
-            -f ${{ matrix.dockerfile }} \
-            ${{ matrix.context }}
-          
-      - name: Save Docker Image
-        run: |
-          docker save \
-            -o ${{ matrix.image }}.tar \
-            $DOCKERHUB_USERNAME/${{ matrix.image }}:latest
-
-      - name: Upload Docker Artifact
-        uses: actions/upload-artifact@v4
+      - name: Build and Push CI Image
+        uses: docker/build-push-action@v7
         with:
-          name: ${{ matrix.image }}
-          path: ${{ matrix.image }}.tar
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_USERNAME }}/${{ matrix.image }}:unstable-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs:
+      - setup 
+      - docker-build
 
     strategy:
       matrix:
@@ -77,19 +93,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Docker Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.image }}
-
-      - name: Load Docker Image
-        run: |
-          docker load -i ${{ matrix.image }}.tar
-
       - name: Run Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.DOCKERHUB_USERNAME }}/${{ matrix.image }}:latest
+          image-ref: ${{ env.DOCKERHUB_USERNAME }}/${{ matrix.image }}:unstable-${{ github.sha }}
           format: table
           exit-code: 1
           ignore-unfixed: true
@@ -113,22 +120,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Backend Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: skillpulse-backend
-
-      - name: Download Frontend Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: skillpulse-frontend
-
-      - name: Load Backend Image
-        run: docker load -i skillpulse-backend.tar
-
-      - name: Load Frontend Image
-        run: docker load -i skillpulse-frontend.tar
-
       - name: Create .env file
         run: |
           cat <<EOF > .env
@@ -137,10 +128,13 @@ jobs:
           DB_USER=skillpulse
           DB_PASSWORD= ${{secrets.DB_PASSWORD}}
           DOCKERHUB_USERNAME=$DOCKERHUB_USERNAME
+          IMAGE_TAG=unstable-${GITHUB_SHA}
           EOF
 
       - name: Start Containers
-        run: docker compose up -d --build
+        run: |
+             docker compose pull
+             docker compose up -d
 
       - name: Wait for Services
         run: sleep 20
@@ -153,9 +147,12 @@ jobs:
         run: docker compose down -v
 
   push-images:
-      name: Push Docker Images
+      name: Promote image to stable tags
       runs-on: ubuntu-latest
-      needs: smoke-test
+      needs: 
+        - setup
+        - security-scan
+        - smoke-test
 
       strategy:
         matrix:
@@ -173,22 +170,28 @@ jobs:
             username: ${{ env.DOCKERHUB_USERNAME }}
             password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-        - name: Download Docker Image Artifact
-          uses: actions/download-artifact@v4
-          with:
-            name: ${{ matrix.image }}
+        - name: Pull unstable image
+          run: |
+            docker pull \
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:unstable-${GITHUB_SHA}
 
-        - name: Load Backend Image
-          run: docker load -i ${{ matrix.image }}.tar
-
-        - name: Retag Docker Image
+        - name: Promote stable tag
           run: |
             docker tag \
-            $DOCKERHUB_USERNAME/${{ matrix.image }}:latest \
-            $DOCKERHUB_USERNAME/${{ matrix.image }}:${{ github.sha }}
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:unstable-${GITHUB_SHA} \
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:${{ needs.setup.outputs.image_tag }}
 
-        - name: Push Latest Tag
-          run: docker push $DOCKERHUB_USERNAME/${{ matrix.image }}:latest
+        - name: Push stable tag
+          run: |
+            docker push \
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:${{ needs.setup.outputs.image_tag }}            
 
-        - name: Push SHA Tag
-          run: docker push $DOCKERHUB_USERNAME/${{ matrix.image }}:${{ github.sha }}
+        - name: Promote latest tag
+          if: needs.setup.outputs.is_release == 'true'
+          run: |
+            docker tag \
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:unstable-${GITHUB_SHA} \
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:latest
+                  
+            docker push \
+            $DOCKERHUB_USERNAME/${{ matrix.image }}:latest
